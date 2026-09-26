@@ -5,6 +5,7 @@
 using System.Net.Http;
 #endif
 
+using System.Net;
 using Google.Protobuf;
 using OpAmp.Proto.V1;
 using OpenTelemetry.Internal;
@@ -21,6 +22,9 @@ internal sealed class PlainHttpTransport : IOpAmpTransport, IDisposable
     private readonly Uri uri;
     private readonly HttpClient httpClient;
     private readonly FrameProcessor processor;
+
+    // Retry-After from the last 429 / 503: no request before this (Stopwatch ticks; 0: none).
+    private long notBefore;
 
     public PlainHttpTransport(OpAmpClientSettings settings, FrameProcessor processor)
     {
@@ -53,11 +57,19 @@ internal sealed class PlainHttpTransport : IOpAmpTransport, IDisposable
             Content = byteContent,
         };
 
+        await RetryAfter.WaitAsync(Interlocked.Read(ref this.notBefore), token).ConfigureAwait(false);
+
         // ResponseHeadersRead prevents HttpClient from buffering the entire response body
         // before we can enforce the transport size limit.
         using var response = await this.httpClient
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
             .ConfigureAwait(false);
+
+        if (response.StatusCode is (HttpStatusCode)429 or HttpStatusCode.ServiceUnavailable
+            && RetryAfter.FromHeader(response.Headers.RetryAfter, DateTimeOffset.UtcNow) is { } wait)
+        {
+            Interlocked.Exchange(ref this.notBefore, RetryAfter.Deadline(wait));
+        }
 
         response.EnsureSuccessStatusCode();
 

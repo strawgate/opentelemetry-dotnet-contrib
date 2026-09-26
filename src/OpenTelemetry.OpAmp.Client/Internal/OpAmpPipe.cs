@@ -7,6 +7,7 @@ using OpenTelemetry.OpAmp.Client.Internal.Messages;
 using OpenTelemetry.OpAmp.Client.Internal.Transport;
 using OpenTelemetry.OpAmp.Client.Internal.Transport.Http;
 using OpenTelemetry.OpAmp.Client.Internal.Transport.WebSocket;
+using OpenTelemetry.OpAmp.Client.Internal.Utils;
 using OpenTelemetry.OpAmp.Client.Listeners;
 using OpenTelemetry.OpAmp.Client.Settings;
 
@@ -32,6 +33,7 @@ internal sealed class OpAmpPipe : IDisposable
     private bool hasAccumulatedData;
     private long pendingCustomMessageBytes;
     private ByteString? assignedInstanceUid;
+    private long notBefore; // UNAVAILABLE retry_info: no send before this (Stopwatch ticks; 0: none)
     private Task? flushTask;
     private TaskCompletionSource<bool>? flushCompletion;
 
@@ -326,6 +328,10 @@ internal sealed class OpAmpPipe : IDisposable
                 }
             }
 
+            // The server asked the client to wait (UNAVAILABLE with retry_info).
+            await RetryAfter.WaitAsync(Interlocked.Read(ref this.notBefore), token)
+                .ConfigureAwait(false);
+
             OpAmpClientEventSource.Log.SendingMessage();
 
             await this.transport.SendAsync(message, token)
@@ -353,6 +359,11 @@ internal sealed class OpAmpPipe : IDisposable
         if (message.AgentIdentification is { } agentIdentification)
         {
             this.SetInstanceUid(agentIdentification.NewInstanceUid);
+        }
+
+        if (message.ErrorResponse is { Type: ServerErrorResponseType.Unavailable, RetryInfo: { } retryInfo })
+        {
+            Interlocked.Exchange(ref this.notBefore, RetryAfter.Deadline(RetryAfter.FromRetryInfo(retryInfo.RetryAfterNanoseconds)));
         }
 
         if (this.transport.RequiresResponseBeforeNextSend)
