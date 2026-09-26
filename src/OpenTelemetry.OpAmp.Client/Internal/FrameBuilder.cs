@@ -106,31 +106,7 @@ internal sealed class FrameBuilder : IFrameBuilder
 
     IFrameBuilder IFrameBuilder.AddCapabilities()
     {
-        // TODO: Update the actual capabilities when features are implemented.
-
-        var capabilities = AgentCapabilities.ReportsStatus;
-
-        if (this.settings.Heartbeat.IsEnabled)
-        {
-            capabilities |= AgentCapabilities.ReportsHeartbeat | AgentCapabilities.ReportsHealth;
-        }
-
-        if (this.settings.RemoteConfiguration.AcceptsRemoteConfig)
-        {
-            capabilities |= AgentCapabilities.AcceptsRemoteConfig;
-        }
-
-        if (this.settings.RemoteConfiguration.ReportsRemoteConfigStatus)
-        {
-            capabilities |= AgentCapabilities.ReportsRemoteConfig;
-        }
-
-        if (this.settings.EffectiveConfigurationReporting.EnableReporting)
-        {
-            capabilities |= AgentCapabilities.ReportsEffectiveConfig;
-        }
-
-        this.currentMessage.Capabilities = (ulong)capabilities;
+        this.currentMessage.Capabilities = this.Capabilities();
 
         return this;
     }
@@ -206,8 +182,40 @@ internal sealed class FrameBuilder : IFrameBuilder
         {
             InstanceUid = this.instanceUid,
             SequenceNum = ++this.sequenceNum,
+            Capabilities = this.Capabilities(),
         };
 
         return message;
+    }
+
+    // The spec requires AgentToServer.capabilities in every message, so every message gets it,
+    // not only identification and full state reports.
+    private ulong Capabilities()
+    {
+        // TODO: Update the actual capabilities when features are implemented.
+
+        var capabilities = AgentCapabilities.ReportsStatus;
+
+        if (this.settings.Heartbeat.IsEnabled)
+        {
+            capabilities |= AgentCapabilities.ReportsHeartbeat | AgentCapabilities.ReportsHealth;
+        }
+
+        if (this.settings.RemoteConfiguration.AcceptsRemoteConfig)
+        {
+            capabilities |= AgentCapabilities.AcceptsRemoteConfig;
+        }
+
+        if (this.settings.RemoteConfiguration.ReportsRemoteConfigStatus)
+        {
+            capabilities |= AgentCapabilities.ReportsRemoteConfig;
+        }
+
+        if (this.settings.EffectiveConfigurationReporting.EnableReporting)
+        {
+            capabilities |= AgentCapabilities.ReportsEffectiveConfig;
+        }
+
+        return (ulong)capabilities;
     }
 }

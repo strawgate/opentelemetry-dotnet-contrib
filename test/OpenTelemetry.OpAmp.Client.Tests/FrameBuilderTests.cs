@@ -25,6 +25,25 @@ public class FrameBuilderTests
     }
 
     [Fact]
+    public void FrameBuilder_EveryFrameCarriesCapabilities()
+    {
+        var frameBuilder = new FrameBuilder(new());
+        IFrameBuilder builder = frameBuilder;
+
+        builder.AddAgentDescription().AddCapabilities();
+        var identification = frameBuilder.Build();
+        builder.AddAgentDisconnect();
+        var disconnect = frameBuilder.Build();
+        var bare = frameBuilder.Build();
+
+        foreach (var frame in new[] { identification, disconnect, bare })
+        {
+            Assert.NotEqual(0UL, frame.Capabilities & (ulong)AgentCapabilities.ReportsStatus);
+            Assert.Equal(identification.Capabilities, frame.Capabilities);
+        }
+    }
+
+    [Fact]
     public void FrameBuilder_Sequence()
     {
         var frameBuilder = new FrameBuilder(new());
