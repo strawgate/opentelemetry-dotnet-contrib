@@ -31,6 +31,7 @@ internal sealed class OpAmpPipe : IDisposable
     private bool isDisposed;
     private bool isStopped;
     private bool hasAccumulatedData;
+    private bool fullReportOwed; // the next status frame carries the full identification
     private long pendingCustomMessageBytes;
     private ByteString? assignedInstanceUid;
     private long notBefore; // UNAVAILABLE retry_info: no send before this (Stopwatch ticks; 0: none)
@@ -291,6 +292,14 @@ internal sealed class OpAmpPipe : IDisposable
         }
         else
         {
+            if (this.fullReportOwed && !this.isStopped)
+            {
+                // Rides on a frame that goes out anyway, so a server that stays unreachable
+                // doesn't get an extra request per failure.
+                MessageBuilderHelper.AppendIdentification(this.currentFrame);
+                this.fullReportOwed = false;
+            }
+
             message = this.currentFrame.Build();
             this.hasAccumulatedData = false;
         }
@@ -348,6 +357,15 @@ internal sealed class OpAmpPipe : IDisposable
             this.ReleaseBusy();
 
             OpAmpClientEventSource.Log.SendMessageException(ex);
+
+            // The server did not take the message (refused, throttled, unreachable), so it may be
+            // missing some of the status. Not after a rejection (413): that content must not be
+            // resent as it is.
+            if (ex is not OpAmpRejectedException and not OperationCanceledException)
+            {
+                this.OweFullReport();
+            }
+
             this.TryFlush(token);
         }
     }
@@ -361,9 +379,14 @@ internal sealed class OpAmpPipe : IDisposable
             this.SetInstanceUid(agentIdentification.NewInstanceUid);
         }
 
-        if (message.ErrorResponse is { Type: ServerErrorResponseType.Unavailable, RetryInfo: { } retryInfo })
+        if (message.ErrorResponse is { Type: ServerErrorResponseType.Unavailable } unavailable)
         {
-            Interlocked.Exchange(ref this.notBefore, RetryAfter.Deadline(RetryAfter.FromRetryInfo(retryInfo.RetryAfterNanoseconds)));
+            if (unavailable.RetryInfo is { } retryInfo)
+            {
+                Interlocked.Exchange(ref this.notBefore, RetryAfter.Deadline(RetryAfter.FromRetryInfo(retryInfo.RetryAfterNanoseconds)));
+            }
+
+            this.OweFullReport();
         }
 
         if (this.transport.RequiresResponseBeforeNextSend)
@@ -390,6 +413,14 @@ internal sealed class OpAmpPipe : IDisposable
         lock (this.frameLock)
         {
             this.assignedInstanceUid = instanceUid;
+        }
+    }
+
+    private void OweFullReport()
+    {
+        lock (this.frameLock)
+        {
+            this.fullReportOwed = true;
         }
     }
 

@@ -71,6 +71,11 @@ internal sealed class PlainHttpTransport : IOpAmpTransport, IDisposable
             Interlocked.Exchange(ref this.notBefore, RetryAfter.Deadline(wait));
         }
 
+        if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
+        {
+            throw new OpAmpRejectedException("The server rejected the message (413).");
+        }
+
         response.EnsureSuccessStatusCode();
 
         var responseMessage = await HttpClientHelpers.GetResponseBodyAsByteArrayAsync(
