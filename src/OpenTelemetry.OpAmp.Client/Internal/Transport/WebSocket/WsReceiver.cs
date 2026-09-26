@@ -120,6 +120,33 @@ internal sealed class WsReceiver : IDisposable
         }
     }
 
+    private async Task AnswerCloseAsync(WebSocketReceiveResult result)
+    {
+        // Same send lock as data frames: ClientWebSocket rejects concurrent sends.
+        try
+        {
+            await this.sendLock.WaitAsync(this.disposeTokenSource.Token).ConfigureAwait(false);
+
+            try
+            {
+                if (this.ws.State == WebSocketState.CloseReceived)
+                {
+                    await this.ws
+                        .CloseOutputAsync(result.CloseStatus ?? WebSocketCloseStatus.NormalClosure, result.CloseStatusDescription, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                this.sendLock.Release();
+            }
+        }
+        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException or OperationCanceledException)
+        {
+            OpAmpClientEventSource.Log.TransportCloseException(ex);
+        }
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken token)
     {
         while (!token.IsCancellationRequested && this.ws.State == WebSocketState.Open)
@@ -171,6 +198,12 @@ internal sealed class WsReceiver : IDisposable
                 isClosed = result.CloseStatus != null;
                 workingCount += result.Count;
                 totalCount += result.Count;
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    // RFC 6455 section 5.5.1: answer the server's Close frame.
+                    await this.AnswerCloseAsync(result).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {

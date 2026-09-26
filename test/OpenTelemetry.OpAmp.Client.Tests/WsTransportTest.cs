@@ -276,6 +276,29 @@ public class WsTransportTest
     }
 
     [Fact]
+    public async Task WsTransport_AnswersServerCloseFrame()
+    {
+        var answer = new TaskCompletionSource<WebSocketCloseStatus?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var opAmpServer = new OpAmpFakeWebSocketServer(
+            async (frame, socket, token) =>
+            {
+                await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "going away", token).ConfigureAwait(false);
+                var result = await socket.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), token).ConfigureAwait(false);
+                answer.TrySetResult(result.MessageType == WebSocketMessageType.Close ? result.CloseStatus : null);
+            });
+
+        var frameProcessor = new FrameProcessor();
+        using var wsTransport = CreateTransport(opAmpServer.Endpoint, frameProcessor);
+        await wsTransport.StartAsync(CancellationToken.None);
+        await wsTransport.SendAsync(FrameGenerator.GenerateMockAgentFrame().Frame, CancellationToken.None);
+
+        // RFC 6455 section 5.5.1: the client sends a Close frame back, with the server's code.
+        var completed = await Task.WhenAny(answer.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(answer.Task, completed);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await answer.Task);
+    }
+
+    [Fact]
     public async Task WsTransport_DropsPartialMessageWhenServerClosesBeforeEndOfMessage()
     {
         var partialFrame = FrameGenerator.GenerateMockServerFrame(addHeader: true);
