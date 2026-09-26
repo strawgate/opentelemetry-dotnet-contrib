@@ -50,6 +50,12 @@ internal sealed class OpAmpPipe : IDisposable
 
         this.frameHandler = new(this.OnServerFrameReceived);
         this.processor.Subscribe(this.frameHandler);
+
+        if (transport is ReconnectingWsTransport reconnecting)
+        {
+            // A new connection: identify again, as on the first one.
+            reconnecting.Reconnected += () => this.AppendMessage(MessageBuilderHelper.AppendIdentification);
+        }
     }
 
     public async Task StartAsync(CancellationToken token = default)
@@ -57,6 +63,11 @@ internal sealed class OpAmpPipe : IDisposable
         if (this.transport is WsTransport wsTransport)
         {
             await wsTransport.StartAsync(token)
+                .ConfigureAwait(false);
+        }
+        else if (this.transport is ReconnectingWsTransport reconnecting)
+        {
+            await reconnecting.StartAsync(token)
                 .ConfigureAwait(false);
         }
 
@@ -97,6 +108,11 @@ internal sealed class OpAmpPipe : IDisposable
         if (this.transport is WsTransport wsTransport)
         {
             await wsTransport.StopAsync(token)
+                .ConfigureAwait(false);
+        }
+        else if (this.transport is ReconnectingWsTransport reconnecting)
+        {
+            await reconnecting.StopAsync(token)
                 .ConfigureAwait(false);
         }
     }
@@ -180,7 +196,7 @@ internal sealed class OpAmpPipe : IDisposable
 
     private static IOpAmpTransport ConstructTransport(OpAmpClientSettings settings, FrameProcessor processor) => settings.ConnectionType switch
     {
-        ConnectionType.WebSocket => new WsTransport(settings, processor),
+        ConnectionType.WebSocket => new ReconnectingWsTransport(settings, processor),
         ConnectionType.Http => new PlainHttpTransport(settings, processor),
         _ => throw new NotSupportedException("Unsupported transport type"),
     };

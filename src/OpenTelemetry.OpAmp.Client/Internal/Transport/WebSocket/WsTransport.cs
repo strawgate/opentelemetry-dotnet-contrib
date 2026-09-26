@@ -54,6 +54,11 @@ internal sealed class WsTransport : IOpAmpTransport, IDisposable
     public bool RequiresResponseBeforeNextSend => false;
 
     /// <summary>
+    /// Gets a task that completes when the connection has ended.
+    /// </summary>
+    internal Task Completion => this.receiver.Completion;
+
+    /// <summary>
     /// Connects the WebSocket and starts receiving server frames.
     /// </summary>
     /// <param name="token">A cancellation token scoped to the connect handshake only. It does not govern the receive loop lifetime.</param>

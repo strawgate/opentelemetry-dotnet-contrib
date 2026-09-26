@@ -38,6 +38,11 @@ internal sealed class WsReceiver : IDisposable
         this.sendLock = sendLock;
     }
 
+    /// <summary>
+    /// Gets a task that completes when the receive loop ends: the connection closed or failed.
+    /// </summary>
+    public Task Completion => this.receiveTask ?? Task.CompletedTask;
+
     public void Start(CancellationToken token = default)
     {
 #if NET8_0_OR_GREATER
